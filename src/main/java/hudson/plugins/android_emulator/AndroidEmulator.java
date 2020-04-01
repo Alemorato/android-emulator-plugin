@@ -2,6 +2,7 @@ package hudson.plugins.android_emulator;
 
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import hudson.AbortException;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -16,6 +17,8 @@ import hudson.model.BuildListener;
 import hudson.model.Computer;
 import hudson.model.Node;
 import hudson.model.Result;
+import hudson.model.Run;
+import hudson.model.TaskListener;
 import hudson.plugins.android_emulator.sdk.AndroidSdk;
 import hudson.plugins.android_emulator.sdk.Tool;
 import hudson.plugins.android_emulator.sdk.cli.AdbShellCommands;
@@ -33,6 +36,8 @@ import hudson.util.NullStream;
 import jenkins.model.ArtifactManager;
 import jenkins.model.Jenkins;
 import jenkins.security.MasterToSlaveCallable;
+import jenkins.tasks.SimpleBuildWrapper;
+import jenkins.util.BuildListenerAdapter;
 import net.sf.json.JSONObject;
 import org.apache.commons.io.IOUtils;
 import org.kohsuke.stapler.DataBoundConstructor;
@@ -62,7 +67,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class AndroidEmulator extends BuildWrapper implements Serializable {
+public class AndroidEmulator extends SimpleBuildWrapper implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -112,24 +117,24 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
             boolean useSnapshots, boolean deleteAfterBuild, int startupDelay, int startupTimeout,
             String commandLineOptions, String targetAbi, String deviceDefinition,
             String executable, String avdNameSuffix) {
-        this.avdName = avdName;
-        this.osVersion = osVersion;
-        this.screenDensity = screenDensity;
-        this.screenResolution = screenResolution;
-        this.deviceLocale = deviceLocale;
-        this.sdCardSize = sdCardSize;
+        this.avdName = Util.fixEmptyAndTrim(avdName);
+        this.osVersion = Util.fixEmptyAndTrim(osVersion);
+        this.screenDensity = Util.fixEmptyAndTrim(screenDensity);
+        this.screenResolution = Util.fixEmptyAndTrim(screenResolution);
+        this.deviceLocale = Util.fixEmptyAndTrim(deviceLocale);
+        this.sdCardSize = Util.fixEmptyAndTrim(sdCardSize);
         this.hardwareProperties = hardwareProperties;
         this.wipeData = wipeData;
         this.showWindow = showWindow;
         this.useSnapshots = useSnapshots;
         this.deleteAfterBuild = deleteAfterBuild;
-        this.executable = executable;
+        this.executable = Util.fixEmptyAndTrim(executable);
         this.startupDelay = Math.abs(startupDelay);
         this.startupTimeout = Math.abs(startupTimeout);
-        this.commandLineOptions = commandLineOptions;
-        this.targetAbi = targetAbi;
-        this.deviceDefinition = deviceDefinition;
-        this.avdNameSuffix = avdNameSuffix;
+        this.commandLineOptions = Util.fixEmptyAndTrim(commandLineOptions);
+        this.targetAbi = Util.fixEmptyAndTrim(targetAbi);
+        this.deviceDefinition = Util.fixEmptyAndTrim(deviceDefinition);
+        this.avdNameSuffix = Util.fixEmptyAndTrim(avdNameSuffix);
     }
 
     public boolean getUseNamedEmulator() {
@@ -182,44 +187,52 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
                 deviceLocale, targetAbi, deviceDefinition, avdNameSuffix);
     }
 
-    @Override
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    public Environment setUp(AbstractBuild build, final Launcher launcher, BuildListener listener)
-            throws IOException, InterruptedException {
+	@Override
+	public void setUp(Context context, Run<?, ?> build, FilePath workspace, Launcher launcher, TaskListener listener,
+			EnvVars initialEnvironment) throws IOException, InterruptedException {
         final PrintStream logger = listener.getLogger();
         if (descriptor == null) {
-            descriptor = Jenkins.getInstance().getDescriptorByType(DescriptorImpl.class);
+            descriptor = Jenkins.get().getDescriptorByType(DescriptorImpl.class);
+        }
+
+        Computer computer = workspace.toComputer();
+        if (computer == null) {
+            throw new AbortException("This node is offline");
+        }
+        Node node = computer.getNode();
+        if (node == null) {
+            throw new AbortException("This node is offline");
         }
 
         // Substitute environment and build variables into config
-        final EnvVars envVars = Utils.getEnvironment(build, listener);
-        final Map<String, String> buildVars = build.getBuildVariables();
+        final EnvVars envVars = build.getEnvironment(listener);
+        envVars.putAll(computer.getEnvironment());
 
         // Device properties
-        String avdName = Utils.expandVariables(envVars, buildVars, this.avdName);
-        String osVersion = Utils.expandVariables(envVars, buildVars, this.osVersion);
-        String screenDensity = Utils.expandVariables(envVars, buildVars, this.screenDensity);
-        String screenResolution = Utils.expandVariables(envVars, buildVars, this.screenResolution);
-        String deviceLocale = Utils.expandVariables(envVars, buildVars, this.deviceLocale);
-        String sdCardSize = Utils.expandVariables(envVars, buildVars, this.sdCardSize);
+        String avdName = Utils.expandVariables(envVars, this.avdName);
+        String osVersion = Utils.expandVariables(envVars, this.osVersion);
+        String screenDensity = Utils.expandVariables(envVars, this.screenDensity);
+        String screenResolution = Utils.expandVariables(envVars, this.screenResolution);
+        String deviceLocale = Utils.expandVariables(envVars, this.deviceLocale);
+        String sdCardSize = Utils.expandVariables(envVars, this.sdCardSize);
         if (sdCardSize != null) {
             sdCardSize = sdCardSize.toUpperCase().replaceAll("[ B]", "");
         }
-        String targetAbi = Utils.expandVariables(envVars, buildVars, this.targetAbi);
-        String deviceDefinition = Utils.expandVariables(envVars, buildVars, this.deviceDefinition);
-        String avdNameSuffix = Utils.expandVariables(envVars, buildVars, this.avdNameSuffix);
+        String targetAbi = Utils.expandVariables(envVars, this.targetAbi);
+        String deviceDefinition = Utils.expandVariables(envVars, this.deviceDefinition);
+        String avdNameSuffix = Utils.expandVariables(envVars, this.avdNameSuffix);
 
         // Expand macros within hardware property values
         final int propCount = hardwareProperties == null ? 0 : hardwareProperties.length;
         HardwareProperty[] expandedProperties = new HardwareProperty[propCount];
         for (int i = 0; i < propCount; i++) {
             HardwareProperty prop = hardwareProperties[i];
-            String expandedValue = Utils.expandVariables(envVars, buildVars, prop.value);
+            String expandedValue = Utils.expandVariables(envVars, prop.value);
             expandedProperties[i] = new HardwareProperty(prop.key, expandedValue);
         }
 
         // Emulator properties
-        String commandLineOptions = Utils.expandVariables(envVars, buildVars, this.commandLineOptions);
+        String commandLineOptions = Utils.expandVariables(envVars, this.commandLineOptions);
 
         // Despite the nice inline checks and warnings when the user is editing the config,
         // these are not binding, so the user may have saved invalid configuration.
@@ -230,7 +243,7 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
         if (configError != null) {
             log(logger, Messages.ERROR_MISCONFIGURED(configError));
             build.setResult(Result.NOT_BUILT);
-            return null;
+            return;
         }
 
         // Build emulator config, ensuring that variables expand to valid SDK values
@@ -244,12 +257,11 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
         } catch (IllegalArgumentException e) {
             log(logger, Messages.EMULATOR_CONFIGURATION_BAD(e.getLocalizedMessage()));
             build.setResult(Result.NOT_BUILT);
-            return null;
+            return;
         }
 
         // SDK location
-        Node node = Computer.currentComputer().getNode();
-        String configuredAndroidSdkRoot = Utils.expandVariables(envVars, buildVars, descriptor.androidHome);
+        String configuredAndroidSdkRoot = Utils.expandVariables(envVars, descriptor.androidHome);
 
         // Confirm that the required SDK tools are available
         AndroidSdk androidSdk = Utils.getAndroidSdk(launcher, node, envVars, configuredAndroidSdkRoot, androidSdkHome);
@@ -261,7 +273,7 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
             // Couldn't find an SDK, don't want to install it, give up
             log(logger, Messages.SDK_TOOLS_NOT_FOUND());
             build.setResult(Result.NOT_BUILT);
-            return null;
+            return;
         }
 
         // SDK Tools not found, or does not match expected download version, if we should manage SDK
@@ -281,7 +293,7 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
             } catch (SdkInstallationException e) {
                 log(logger, Messages.SDK_INSTALLATION_FAILED(), e);
                 build.setResult(Result.NOT_BUILT);
-                return null;
+                return;
             }
         }
 
@@ -298,12 +310,12 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
         String displayHome = androidSdk.hasKnownRoot() ? androidSdk.getSdkRoot() : Messages.USING_PATH();
         log(logger, Messages.USING_SDK(displayHome));
 
-        return doSetUp(build, launcher, listener, androidSdk, emuConfig, expandedProperties);
+        doSetUp(build, launcher, workspace, listener, androidSdk, emuConfig, expandedProperties);
     }
 
     @SuppressFBWarnings("DM_DEFAULT_ENCODING")
-    private Environment doSetUp(final AbstractBuild<?, ?> build, final Launcher launcher,
-            final BuildListener listener, final AndroidSdk androidSdk,
+    private Environment doSetUp(final Run<?, ?> build, final Launcher launcher, FilePath workspace,
+            final TaskListener listener, final AndroidSdk androidSdk,
             final EmulatorConfig emuConfig, final HardwareProperty[] hardwareProperties)
                 throws IOException, InterruptedException {
         final PrintStream logger = listener.getLogger();
@@ -459,11 +471,6 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
         final int emulatorAPILevel = (emuConfig.getOsVersion() != null) ? emuConfig.getOsVersion().getSdkLevel() : 0;
         final AdbShellCommands adbShellCmds = SdkCliCommandFactory.getAdbShellCommandForAPILevel(emulatorAPILevel);
 
-        // Start dumping logcat to temporary file
-        final FilePath workspace = build.getWorkspace();
-        if (workspace == null) {
-            throw new BuildNodeUnavailableException();
-        }
         final ArtifactManager artifactManager = build.getArtifactManager();
         final FilePath logcatFile = workspace.createTextTempFile("logcat_", ".log", "", false);
         final OutputStream logcatStream = logcatFile.write();
@@ -627,7 +634,7 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
      */
     private void cleanUp(EmulatorConfig emulatorConfig, AndroidEmulatorContext emu, AndroidSdk androidSdk,
                          @Nullable Proc logcatProcess, @Nullable FilePath logcatFile, @Nullable OutputStream logcatStream,
-                         @Nullable ArtifactManager artifactManager, @Nullable Launcher launcher, @Nullable BuildListener listener)
+                         @Nullable ArtifactManager artifactManager, @Nullable Launcher launcher, @Nullable TaskListener listener)
            throws IOException, InterruptedException {
 
         // FIXME: Sometimes on Windows neither the emulator.exe nor the adb.exe processes die.
@@ -667,7 +674,7 @@ public class AndroidEmulator extends BuildWrapper implements Serializable {
                 log(emu.logger(), Messages.ARCHIVING_LOG());
                 final FilePath workspace = logcatFile.getParent();
                 final Map<String, String> artifacts = Collections.singletonMap("logcat.txt", logcatFile.getName());
-                artifactManager.archive(workspace, launcher, listener, artifacts);
+                artifactManager.archive(workspace, launcher, new BuildListenerAdapter(listener), artifacts);
             }
             logcatFile.delete();
         }

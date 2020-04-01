@@ -12,6 +12,7 @@ import hudson.model.BuildListener;
 import hudson.model.Computer;
 import hudson.model.Hudson;
 import hudson.model.Node;
+import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.plugins.android_emulator.AndroidEmulator.DescriptorImpl;
 import hudson.plugins.android_emulator.Constants;
@@ -81,7 +82,7 @@ public class Utils {
      * @param listener The listener used to get the environment variables.
      * @return Environment variables for the current computer, with the build variables taking precedence.
      */
-    public static EnvVars getEnvironment(AbstractBuild<?, ?> build, BuildListener listener) {
+    public static EnvVars getEnvironment(Run<?, ?> build, TaskListener listener) {
         final EnvVars envVars = new EnvVars();
         try {
             // Get environment of the local computer
@@ -419,15 +420,17 @@ public class Utils {
      * @return A list of possible root directories of an Android SDK
      */
     private static List<String> getPossibleSdkRootDirectoriesFromPath(final EnvVars envVars) {
-        // Get list of directories from the PATH environment variable
-        List<String> paths = Arrays.asList(envVars.get(Constants.ENV_VAR_SYSTEM_PATH).split(File.pathSeparator));
-        final List<String> possibleSdkRootsFromPath = new ArrayList<String>();
+    	final List<String> possibleSdkRootsFromPath = new ArrayList<>();
 
-        // Examine each directory to see whether it contains the expected Android tools
-        for (String path : paths) {
-            if (path.matches(".*[\\\\/]" + ToolLocator.TOOLS_DIR + "[\\\\/]*$")) {
-                possibleSdkRootsFromPath.add(path);
-            }
+    	// Get list of directories from the PATH environment variable
+        String paths = envVars.get(Constants.ENV_VAR_SYSTEM_PATH);
+        if (paths != null) {
+	        // Examine each directory to see whether it contains the expected Android tools
+	        for (String path : paths.split(File.pathSeparator)) {
+	            if (path.matches(".*[\\\\/]" + ToolLocator.TOOLS_DIR + "[\\\\/]*$")) {
+	                possibleSdkRootsFromPath.add(path);
+	            }
+	        }
         }
 
         return possibleSdkRootsFromPath;
@@ -591,10 +594,23 @@ public class Utils {
      * The Jenkins-specific build variables take precedence over environment variables.
      *
      * @param envVars  Map of the environment variables.
+     * @param token  The token which may or may not contain variables in the format <tt>${foo}</tt>.
+     * @return  The given token, with applicable variable expansions done.
+     */
+    public static String expandVariables(EnvVars envVars, String token) {
+    	return Util.fixEmptyAndTrim(Util.replaceMacro(token, envVars));
+    }
+
+    /**
+     * Expands the variable in the given string to its value in the variables available to this build.
+     * The Jenkins-specific build variables take precedence over environment variables.
+     *
+     * @param envVars  Map of the environment variables.
      * @param buildVars  Map of the build-specific variables.
      * @param token  The token which may or may not contain variables in the format <tt>${foo}</tt>.
      * @return  The given token, with applicable variable expansions done.
      */
+    @Deprecated
     public static String expandVariables(EnvVars envVars, Map<String,String> buildVars,
             String token) {
         final Map<String,String> vars = new HashMap<String,String>(envVars);

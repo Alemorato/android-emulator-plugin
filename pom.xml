@@ -3,8 +3,7 @@
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
-    <version>3.0</version>
-    <relativePath>../pom.xml</relativePath>
+    <version>3.43</version>
   </parent>
 
   <artifactId>android-emulator</artifactId>
@@ -14,8 +13,7 @@
   <url>http://wiki.jenkins-ci.org/display/JENKINS/Android+Emulator+Plugin</url>
 
   <properties>
-    <jenkins.version>2.32</jenkins.version>
-    <java.version>1.7</java.version>
+    <java.level>8</java.level>
   </properties>
 
   <developers>

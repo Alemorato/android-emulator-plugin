@@ -4,7 +4,6 @@ import hudson.FilePath;
 import hudson.Functions;
 import hudson.Launcher;
 import hudson.Util;
-import hudson.model.BuildListener;
 import hudson.model.TaskListener;
 import hudson.plugins.android_emulator.AndroidEmulator.HardwareProperty;
 import hudson.plugins.android_emulator.sdk.AndroidSdk;
@@ -248,7 +247,7 @@ class EmulatorConfig implements Serializable {
      * @return A Callable that will handle the detection/creation of an appropriate AVD.
      */
     public Callable<Boolean, AndroidEmulatorException> getEmulatorCreationTask(AndroidSdk androidSdk,
-                                                                               BuildListener listener) {
+                                                                               TaskListener listener) {
         return new EmulatorCreationTask(androidSdk, listener);
     }
 
@@ -261,7 +260,7 @@ class EmulatorConfig implements Serializable {
      * @return A Callable that will update the config of the current AVD.
      */
     public Callable<Void, IOException> getEmulatorConfigTask(HardwareProperty[] hardwareProperties,
-                                                             BuildListener listener) {
+    		TaskListener listener) {
         return new EmulatorConfigTask(hardwareProperties, listener);
     }
 
@@ -436,10 +435,10 @@ class EmulatorConfig implements Serializable {
         private static final long serialVersionUID = 1L;
         private final AndroidSdk androidSdk;
 
-        private final BuildListener listener;
+        private final TaskListener listener;
         private transient PrintStream logger;
 
-        public EmulatorCreationTask(AndroidSdk androidSdk, BuildListener listener) {
+        public EmulatorCreationTask(AndroidSdk androidSdk, TaskListener listener) {
             this.androidSdk = androidSdk;
             this.listener = listener;
         }
@@ -680,10 +679,10 @@ class EmulatorConfig implements Serializable {
         private static final long serialVersionUID = 1L;
 
         private final HardwareProperty[] hardwareProperties;
-        private final BuildListener listener;
+        private final TaskListener listener;
         private transient PrintStream logger;
 
-        public EmulatorConfigTask(HardwareProperty[] hardwareProperties, BuildListener listener) {
+        public EmulatorConfigTask(HardwareProperty[] hardwareProperties, TaskListener listener) {
             this.hardwareProperties = hardwareProperties;
             this.listener = listener;
         }

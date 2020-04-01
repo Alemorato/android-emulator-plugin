@@ -1,5 +1,6 @@
 package hudson.plugins.android_emulator;
 
+import org.apache.commons.lang.math.RandomUtils;
 import org.jvnet.hudson.plugins.port_allocator.PortAllocationManager;
 
 import java.io.IOException;
@@ -9,9 +10,7 @@ import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.Launcher.ProcStarter;
 import hudson.Proc;
-import hudson.model.AbstractBuild;
-import hudson.model.BuildListener;
-import hudson.model.Computer;
+import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.plugins.android_emulator.sdk.AndroidSdk;
 import hudson.plugins.android_emulator.sdk.cli.SdkCliCommand;
@@ -31,21 +30,20 @@ public class AndroidEmulatorContext {
 
 	private AndroidSdk sdk;
 
-	private AbstractBuild<?, ?> build;
-	private BuildListener listener;
+	private Run<?, ?> run;
+	private TaskListener listener;
 	private Launcher launcher;
 
-	public AndroidEmulatorContext(AbstractBuild<?, ?> build_,
-			Launcher launcher_, BuildListener listener_, AndroidSdk sdk_)
+	public AndroidEmulatorContext(Run<?, ?> run,
+			Launcher launcher_, TaskListener listener_, AndroidSdk sdk_)
 			throws InterruptedException, IOException {
-		build = build_;
+		this.run = run;
 		listener = listener_;
 		launcher = launcher_;
 		sdk = sdk_;
 
         // Use the Port Allocator plugin to reserve the ports we need
-        final Computer computer = Computer.currentComputer();
-        portAllocator = PortAllocationManager.getManager(computer);
+        portAllocator = PortAllocationManager.getManager(launcher.getComputer());
 
         // ADB allows up to 64 local devices, each of which uses two consecutive ports: one for the
         // user telnet interface, and one to communicate with ADB.  These pairs start at port 5554.
@@ -63,27 +61,26 @@ public class AndroidEmulatorContext {
 
         // When using the emulator `-port` option, the first port must be even, so here we reserve
         // three consecutive ports, ensuring that we will get an even port followed by an odd
-        int[] ports = portAllocator.allocatePortRange(build, PORT_RANGE_START, PORT_RANGE_END, 3, true);
+//        int[] ports = portAllocator.allocatePortRange(run, PORT_RANGE_START, PORT_RANGE_END, 3, true);
 
         // Assign the ports the user and ADB interfaces should use, such that the user port is even
-        int i = 0;
-        if (ports[i] % 2 != 0) {
-            i++;
-        }
-        userPort = ports[i++];
-        adbPort = ports[i++];
-
-        // Release the port that was reserved but not used
-        portAllocator.free(i == 2 ? ports[2] : ports[0]);
+//        int i = 0;
+//        if (ports[i] % 2 != 0) {
+//            i++;
+//        }
+        userPort = PORT_RANGE_START + RandomUtils.nextInt(127);
+        adbPort = userPort++;
+//
+//        // Release the port that was reserved but not used
+//        portAllocator.free(i == 2 ? ports[2] : ports[0]);
 
         // Reserve two further ports for the ADB server and the callback socket.
         // Use a separate port range so as not to tie up emulator ports unnecessarily
         final int SERVER_PORT_RANGE_START = PORT_RANGE_END;
         final int SERVER_PORT_RANGE_END = SERVER_PORT_RANGE_START + 64;
-        ports = portAllocator.allocatePortRange(build, SERVER_PORT_RANGE_START,
-                SERVER_PORT_RANGE_END, 2, false);
-        adbServerPort = ports[0];
-        emulatorCallbackPort = ports[1];
+//        ports = portAllocator.allocatePortRange(run, SERVER_PORT_RANGE_START,SERVER_PORT_RANGE_END, 2, false);
+        adbServerPort = SERVER_PORT_RANGE_START + RandomUtils.nextInt(63);
+        emulatorCallbackPort = adbServerPort++;
 
         // Set the emulator qualifier based on the telnet port
         serial = String.format("emulator-%d", userPort);
@@ -112,7 +109,7 @@ public class AndroidEmulatorContext {
 		return serial;
 	}
 
-	public BuildListener listener() {
+	public TaskListener listener() {
 		return listener;
 	}
 	public Launcher launcher() {
@@ -144,7 +141,7 @@ public class AndroidEmulatorContext {
 	 */
 	public ProcStarter getProcStarter(final ArgumentListBuilder command, final EnvVars env)
 			throws IOException, InterruptedException {
-		final EnvVars buildEnvironment = build.getEnvironment(TaskListener.NULL);
+		final EnvVars buildEnvironment = run.getEnvironment(TaskListener.NULL);
 		buildEnvironment.put(Constants.ENV_VAR_ANDROID_ADB_SERVER_PORT, Integer.toString(adbServerPort));
 		if (sdk.hasKnownHome()) {
 			buildEnvironment.put(Constants.ENV_VAR_ANDROID_SDK_HOME, sdk.getSdkHome());

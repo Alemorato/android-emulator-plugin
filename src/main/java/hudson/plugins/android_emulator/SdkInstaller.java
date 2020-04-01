@@ -5,8 +5,7 @@ import hudson.FilePath;
 import hudson.Launcher;
 import hudson.Launcher.ProcStarter;
 import hudson.Proc;
-import hudson.model.BuildListener;
-import hudson.model.Computer;
+import hudson.model.TaskListener;
 import hudson.model.Node;
 import hudson.plugins.android_emulator.SdkInstaller.AndroidInstaller.SdkUnavailableException;
 import hudson.plugins.android_emulator.sdk.AndroidSdk;
@@ -45,6 +44,8 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.Semaphore;
 
+import javax.annotation.CheckForNull;
+
 import static hudson.plugins.android_emulator.AndroidEmulator.log;
 
 public class SdkInstaller {
@@ -60,24 +61,19 @@ public class SdkInstaller {
      *
      * @return An {@code AndroidSdk} object for the newly-installed SDK.
      */
-    public static AndroidSdk install(Launcher launcher, BuildListener listener, String androidSdkHome)
+    public static AndroidSdk install(Launcher launcher, TaskListener listener, String androidSdkHome)
             throws SdkInstallationException, IOException, InterruptedException {
-        Semaphore semaphore = acquireLock();
+        Node node = launcher.getComputer().getNode();
+		Semaphore semaphore = acquireLock(node);
         try {
-            return doInstall(launcher, listener, androidSdkHome);
+            return doInstall(node, launcher, listener, androidSdkHome);
         } finally {
             semaphore.release();
         }
     }
 
-    private static AndroidSdk doInstall(Launcher launcher, BuildListener listener, String androidSdkHome)
+    private static AndroidSdk doInstall(Node node, Launcher launcher, TaskListener listener, String androidSdkHome)
             throws SdkInstallationException, IOException, InterruptedException {
-        // We should install the SDK on the current build machine
-        final Node node = Computer.currentComputer().getNode();
-        if (node == null) {
-            throw new BuildNodeUnavailableException();
-        }
-
         // Install the SDK if required
         String androidHome;
         try {
@@ -160,7 +156,7 @@ public class SdkInstaller {
      * @return Path where the SDK is installed, regardless of whether it was installed right now.
      * @throws SdkUnavailableException If the Android SDK is not available on this platform.
      */
-    private static FilePath installBasicSdk(final BuildListener listener, Node node)
+    private static FilePath installBasicSdk(final TaskListener listener, Node node)
             throws SdkUnavailableException, IOException, InterruptedException {
         // Locate where the SDK should be installed to on this node
         final FilePath installDir = Utils.getSdkInstallDirectory(node);
@@ -322,7 +318,7 @@ public class SdkInstaller {
         }
 
         // Grab the lock and attempt installation
-        Semaphore semaphore = acquireLock();
+        Semaphore semaphore = acquireLock(launcher.getComputer().getNode());
         try {
             installComponent(logger, launcher, sdk, components);
         } finally {
@@ -433,7 +429,7 @@ public class SdkInstaller {
      * @param launcher Used for running tasks on the remote node.
      * @param listener Used to access logger.
      */
-    public static void optOutOfSdkStatistics(Launcher launcher, BuildListener listener, String androidSdkHome) {
+    public static void optOutOfSdkStatistics(Launcher launcher, TaskListener listener, String androidSdkHome) {
         Callable<Void, Exception> optOutTask = new StatsOptOutTask(androidSdkHome, listener);
         try {
             launcher.getChannel().call(optOutTask);
@@ -447,16 +443,17 @@ public class SdkInstaller {
      * <p>
      * The lock only has one permit, meaning that other executors on the same node which want to
      * install SDK components will block here until the lock is released by another executor.
+     * @param node where to install the SDK
      *
      * @return The semaphore for the current machine, which must be released once finished with.
      */
-    private static Semaphore acquireLock() throws InterruptedException, IOException {
-        // Retrieve the lock for this node
-        Semaphore semaphore;
-        final Node node = Computer.currentComputer().getNode();
+    private static Semaphore acquireLock(@CheckForNull Node node) throws InterruptedException, IOException {
         if (node == null) {
             throw new BuildNodeUnavailableException();
         }
+
+        // Retrieve the lock for this node
+        Semaphore semaphore;
         synchronized (node) {
             semaphore = mutexByNode.get(node);
             if (semaphore == null) {
@@ -541,10 +538,10 @@ public class SdkInstaller {
         private static final long serialVersionUID = 1L;
         private final String androidSdkHome;
 
-        private final BuildListener listener;
+        private final TaskListener listener;
         private transient PrintStream logger;
 
-        public StatsOptOutTask(String androidSdkHome, BuildListener listener) {
+        public StatsOptOutTask(String androidSdkHome, TaskListener listener) {
             this.androidSdkHome = androidSdkHome;
             this.listener = listener;
         }
