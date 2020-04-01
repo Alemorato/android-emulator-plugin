@@ -53,7 +53,7 @@ public class AndroidEmulatorContext {
         // http://android.googlesource.com/platform/system/core/+/d387acc/adb/transport_local.cpp#44
         //
         // So long as the ADB server automatically registers itself with any emulators in the
-        // standard port range of 5555â€“5861, then we should avoid using that port range.
+        // standard port range of 5555–5861, then we should avoid using that port range.
         // Otherwise, when we run multiple ADB servers and emulators at the same time, each of the
         // ADB servers will race to register with each emulator, meaning that each build will most
         // likely end up with an emulator that always ends up appearing to be "offline".
@@ -84,7 +84,7 @@ public class AndroidEmulatorContext {
         final int SERVER_PORT_RANGE_END = SERVER_PORT_RANGE_START + 64;
         ports = portAllocator.allocatePortRange(build, SERVER_PORT_RANGE_START,
                 SERVER_PORT_RANGE_END, 2, false);
-        adbServerPort = ports[0];
+        adbServerPort = 5037;
         emulatorCallbackPort = ports[1];
 
         // Set the emulator qualifier based on the telnet port
