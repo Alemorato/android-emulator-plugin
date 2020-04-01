@@ -11,7 +11,9 @@ import hudson.Launcher;
 import hudson.Proc;
 import hudson.Util;
 import hudson.matrix.Combination;
+import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
+import hudson.model.BuildListener;
 import hudson.model.Computer;
 import hudson.model.Node;
 import hudson.model.Result;
@@ -191,7 +193,7 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
 			EnvVars initialEnvironment) throws IOException, InterruptedException {
         final PrintStream logger = listener.getLogger();
         if (descriptor == null) {
-            descriptor = Jenkins.get().getDescriptorByType(DescriptorImpl.class);
+            descriptor = Jenkins.getInstance().getDescriptorByType(DescriptorImpl.class);
         }
 
         Computer computer = workspace.toComputer();
@@ -309,27 +311,29 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
         String displayHome = androidSdk.hasKnownRoot() ? androidSdk.getSdkRoot() : Messages.USING_PATH();
         log(logger, Messages.USING_SDK(displayHome));
 
-        context.setDisposer(doSetUp(build, launcher, workspace, listener, androidSdk, emuConfig, expandedProperties));
+        doSetUp(context, build, launcher, workspace, listener, androidSdk, emuConfig, expandedProperties);
     }
 
-	@SuppressFBWarnings("DM_DEFAULT_ENCODING")
-    private Disposer doSetUp(final Run<?, ?> build, final Launcher launcher, FilePath workspace,
+    @SuppressFBWarnings("DM_DEFAULT_ENCODING")
+    private Environment doSetUp(Context context, final Run<?, ?> build, final Launcher launcher, FilePath workspace,
             final TaskListener listener, final AndroidSdk androidSdk,
             final EmulatorConfig emuConfig, final HardwareProperty[] hardwareProperties)
                 throws IOException, InterruptedException {
         final PrintStream logger = listener.getLogger();
 
         // First ensure that emulator exists
-        boolean emulatorAlreadyExists = false;
+        final boolean emulatorAlreadyExists;
         try {
             Callable<Boolean, AndroidEmulatorException> task = emuConfig.getEmulatorCreationTask(androidSdk, listener);
             emulatorAlreadyExists = launcher.getChannel().call(task);
         } catch (EmulatorDiscoveryException ex) {
             log(logger, Messages.CANNOT_START_EMULATOR(ex.getMessage()));
             build.setResult(Result.FAILURE);
+            return null;
         } catch (AndroidEmulatorException ex) {
             log(logger, Messages.COULD_NOT_CREATE_EMULATOR(ex.getMessage()));
             build.setResult(Result.NOT_BUILT);
+            return null;
         }
 
         // Update emulator configuration with desired hardware properties
@@ -418,6 +422,7 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
         // Check whether a failure was reported on stdout
         if (emulatorOutput.toString().contains("image is used by another emulator")) {
             log(logger, Messages.EMULATOR_ALREADY_IN_USE(emuConfig.getAvdName()));
+            return null;
         }
 
         // Sitting on the socket appears to break adb. If you try and do this you always end up with device offline.
@@ -431,6 +436,7 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
             log(logger, Messages.EMULATOR_DID_NOT_START());
             build.setResult(Result.NOT_BUILT);
             cleanUp(emuConfig, emu, androidSdk);
+            return null;
         }
         log(logger, Messages.EMULATOR_CONSOLE_REPORT(socket));
 
@@ -460,6 +466,7 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
             }
             build.setResult(Result.NOT_BUILT);
             cleanUp(emuConfig, emu, androidSdk);
+            return null;
         }
 
         final int emulatorAPILevel = (emuConfig.getOsVersion() != null) ? emuConfig.getOsVersion().getSdkLevel() : 0;
@@ -542,19 +549,71 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
         final long bootCompleteTime = System.currentTimeMillis();
         log(logger, Messages.EMULATOR_IS_READY((bootCompleteTime - bootTime) / 1000));
 
-        return new Disposer() {
-			/**
-			 * 
-			 */
-			private static final long serialVersionUID = 1L;
+        context.setDisposer(new CleanupDisposer(emuConfig, emu, androidSdk, logWriter, logcatFile, logcatStream));
 
-			@Override
-			public void tearDown(Run<?,?> build, FilePath workspace, Launcher launcher, TaskListener listener) throws IOException, InterruptedException {
-				cleanUp(emuConfig, emu, androidSdk, emu.getToolProcStarter(adbSetLogCatFormatCmd)
-		                .stdout(logcatStream).stderr(new NullStream()).start(), logcatFile, logcatStream, artifactManager, launcher, listener);
-			}
+        // Return wrapped environment
+        return new Environment() {
+            @Override
+            public void buildEnvVars(Map<String, String> env) {
+                env.put(Constants.ENV_VAR_ANDROID_SERIAL, emu.serial());
+                env.put(Constants.ENV_VAR_ANDROID_AVD_DEVICE, emu.serial());
+                env.put(Constants.ENV_VAR_ANDROID_AVD_ADB_PORT, Integer.toString(emu.adbPort()));
+                env.put(Constants.ENV_VAR_ANDROID_AVD_USER_PORT, Integer.toString(emu.userPort()));
+                env.put(Constants.ENV_VAR_ANDROID_AVD_NAME, emuConfig.getAvdName());
+                env.put(Constants.ENV_VAR_ANDROID_ADB_SERVER_PORT, Integer.toString(emu.adbServerPort()));
+                env.put(Constants.ENV_VAR_ANDROID_TMP_LOGCAT_FILE, logcatFile.getRemote());
+                if (!emuConfig.isNamedEmulator()) {
+                    env.put(Constants.ENV_VAR_ANDROID_AVD_OS, emuConfig.getOsVersion().toString());
+                    env.put(Constants.ENV_VAR_ANDROID_AVD_DENSITY, emuConfig.getScreenDensity().toString());
+                    env.put(Constants.ENV_VAR_ANDROID_AVD_RESOLUTION, emuConfig.getScreenResolution().toString());
+                    env.put(Constants.ENV_VAR_ANDROID_AVD_SKIN, emuConfig.getScreenResolution().getSkinName());
+                    env.put(Constants.ENV_VAR_ANDROID_AVD_LOCALE, emuConfig.getDeviceLocale());
+                }
+                if (androidSdk.hasKnownRoot()) {
+                    env.put(Constants.ENV_VAR_JENKINS_ANDROID_HOME, androidSdk.getSdkRoot());
+                    env.put(Constants.ENV_VAR_ANDROID_HOME, androidSdk.getSdkRoot());
+
+                    // Prepend the commonly-used Android tools to the start of the PATH for this build
+                    env.put(Constants.ENV_VAR_PATH_SDK_TOOLS, androidSdk.getSdkRoot() + "/tools/");
+                    env.put(Constants.ENV_VAR_PATH_SDK_PLATFORM_TOOLS, androidSdk.getSdkRoot() + "/platform-tools/");
+                    // TODO: Export the newest build-tools folder as well, so aapt and friends can be used
+                }
+            }
+
+            @Override
+            @SuppressWarnings("rawtypes")
+            public boolean tearDown(AbstractBuild build, BuildListener listener)
+                    throws IOException, InterruptedException {
+                cleanUp(emuConfig, emu, androidSdk, logWriter, logcatFile, logcatStream, artifactManager, launcher, listener);
+                return true;
+            }
         };
+    }
 
+    private class CleanupDisposer extends Disposer {
+        /**
+		 * 
+		 */
+		private static final long serialVersionUID = 1L;
+		private EmulatorConfig emulatorConfig;
+		private transient AndroidEmulatorContext emu;
+		private AndroidSdk androidSdk;
+		private transient Proc logWriter;
+		private FilePath logcatFile;
+		private transient OutputStream logcatStream;
+        public CleanupDisposer(EmulatorConfig emulatorConfig, AndroidEmulatorContext emu, AndroidSdk androidSdk, Proc logWriter, FilePath logcatFile, OutputStream logcatStream) {
+            this.emulatorConfig = emulatorConfig;
+            this.emu = emu;
+            this.androidSdk = androidSdk;
+            this.logWriter = logWriter;
+            this.logcatFile = logcatFile;
+            this.logcatStream = logcatStream;
+        }
+
+        @Override
+        public void tearDown(Run<?,?> build, FilePath workspace, Launcher launcher, TaskListener listener) throws IOException, InterruptedException {
+        	cleanUp(emulatorConfig, emu, androidSdk, logWriter, logcatFile, logcatStream, null, launcher, listener);
+        }
     }
 
     /** Helper method for writing to the build log in a consistent manner. */

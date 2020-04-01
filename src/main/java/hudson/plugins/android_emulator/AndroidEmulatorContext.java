@@ -24,25 +24,25 @@ public class AndroidEmulatorContext {
     /** Interval during which an emulator command should complete. */
     public static final int EMULATOR_COMMAND_TIMEOUT_MS = 60 * 1000;
 
-	private int adbPort, userPort, adbServerPort, emulatorCallbackPort;
-	private String serial;
+    private int adbPort, userPort, adbServerPort, emulatorCallbackPort;
+    private String serial;
 
-	private PortAllocationManager portAllocator;
-	private Proc emulatorProcess;
+    private PortAllocationManager portAllocator;
+    private Proc emulatorProcess;
 
-	private AndroidSdk sdk;
+    private AndroidSdk sdk;
 
-	private Run<?, ?> run;
-	private TaskListener listener;
-	private Launcher launcher;
+    private Run<?, ?> run;
+    private TaskListener listener;
+    private Launcher launcher;
 
-	public AndroidEmulatorContext(Run<?, ?> run,
-			Launcher launcher_, TaskListener listener_, AndroidSdk sdk_)
-			throws InterruptedException, IOException {
-		this.run = run;
-		listener = listener_;
-		launcher = launcher_;
-		sdk = sdk_;
+    public AndroidEmulatorContext(Run<?, ?> run,
+            Launcher launcher_, TaskListener listener_, AndroidSdk sdk_)
+            throws InterruptedException, IOException {
+        this.run = run;
+        listener = listener_;
+        launcher = launcher_;
+        sdk = sdk_;
 
         // Use the Port Allocator plugin to reserve the ports we need
         portAllocator = PortAllocationManager.getManager(launcher.getComputer());
@@ -63,7 +63,7 @@ public class AndroidEmulatorContext {
 
         // When using the emulator `-port` option, the first port must be even, so here we reserve
         // three consecutive ports, ensuring that we will get an even port followed by an odd
-        AbstractProject<?, ?> project = new FakeProject(Jenkins.get(), "fake");
+        AbstractProject<?, ?> project = new FakeProject(Jenkins.getInstance(), "fake");
         AbstractBuild<?, ?> build = new FakeBuild((FakeProject) project);
         int[] ports = portAllocator.allocatePortRange(build, PORT_RANGE_START, PORT_RANGE_END, 3, true);
 
@@ -74,9 +74,9 @@ public class AndroidEmulatorContext {
         }
         userPort = ports[i++];
         adbPort = ports[i++];
-//
-//        // Release the port that was reserved but not used
-//        portAllocator.free(i == 2 ? ports[2] : ports[0]);
+
+        // Release the port that was reserved but not used
+        portAllocator.free(i == 2 ? ports[2] : ports[0]);
 
         // Reserve two further ports for the ADB server and the callback socket.
         // Use a separate port range so as not to tie up emulator ports unnecessarily
@@ -99,88 +99,88 @@ public class AndroidEmulatorContext {
         portAllocator.free(emulatorCallbackPort);
     }
 
-	public int adbPort() {
-		return adbPort;
-	}
-	public int userPort() {
-		return userPort;
-	}
-	public int adbServerPort() {
-		return adbServerPort;
-	}
+    public int adbPort() {
+        return adbPort;
+    }
+    public int userPort() {
+        return userPort;
+    }
+    public int adbServerPort() {
+        return adbServerPort;
+    }
     public int getEmulatorCallbackPort() { return emulatorCallbackPort; }
 
-	public String serial() {
-		return serial;
-	}
+    public String serial() {
+        return serial;
+    }
 
-	public TaskListener listener() {
-		return listener;
-	}
-	public Launcher launcher() {
-		return launcher;
-	}
-	public AndroidSdk sdk() {
-		return sdk;
-	}
-	public PrintStream logger() {
-		return listener.getLogger();
-	}
+    public TaskListener listener() {
+        return listener;
+    }
+    public Launcher launcher() {
+        return launcher;
+    }
+    public AndroidSdk sdk() {
+        return sdk;
+    }
+    public PrintStream logger() {
+        return listener.getLogger();
+    }
 
-	public Proc process() {
-		return emulatorProcess;
-	}
-	public void setProcess(Proc process) {
-		emulatorProcess = process;
-	}
+    public Proc process() {
+        return emulatorProcess;
+    }
+    public void setProcess(Proc process) {
+        emulatorProcess = process;
+    }
 
-	/**
-	 * Sets up a standard {@link ProcStarter} for the current context. 
-	 * 
-	 * @param command What command to run
-	 * @param env Additional environment variables to set
-	 * @return A ready ProcStarter
-	 * 
-	 * @throws IOException
-	 * @throws InterruptedException
-	 */
-	public ProcStarter getProcStarter(final ArgumentListBuilder command, final EnvVars env)
-			throws IOException, InterruptedException {
-		final EnvVars buildEnvironment = run.getEnvironment(TaskListener.NULL);
-		buildEnvironment.put(Constants.ENV_VAR_ANDROID_ADB_SERVER_PORT, Integer.toString(adbServerPort));
-		if (sdk.hasKnownHome()) {
-			buildEnvironment.put(Constants.ENV_VAR_ANDROID_SDK_HOME, sdk.getSdkHome());
-		}
-		if (launcher.isUnix()) {
-			buildEnvironment.put(Constants.ENV_VAR_LD_LIBRARY_PATH, String.format("%s/tools/lib", sdk.getSdkRoot()));
-		}
-		if (env != null) {
-			buildEnvironment.putAll(env);
-		}
+    /**
+     * Sets up a standard {@link ProcStarter} for the current context. 
+     * 
+     * @param command What command to run
+     * @param env Additional environment variables to set
+     * @return A ready ProcStarter
+     * 
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    public ProcStarter getProcStarter(final ArgumentListBuilder command, final EnvVars env)
+            throws IOException, InterruptedException {
+        final EnvVars buildEnvironment = run.getEnvironment(TaskListener.NULL);
+        buildEnvironment.put(Constants.ENV_VAR_ANDROID_ADB_SERVER_PORT, Integer.toString(adbServerPort));
+        if (sdk.hasKnownHome()) {
+            buildEnvironment.put(Constants.ENV_VAR_ANDROID_SDK_HOME, sdk.getSdkHome());
+        }
+        if (launcher.isUnix()) {
+            buildEnvironment.put(Constants.ENV_VAR_LD_LIBRARY_PATH, String.format("%s/tools/lib", sdk.getSdkRoot()));
+        }
+        if (env != null) {
+            buildEnvironment.putAll(env);
+        }
 
-		final ProcStarter procStarter = launcher.launch().stdout(new NullStream()).stderr(logger());
-		procStarter.envs(buildEnvironment);
-		if (command != null) {
-			procStarter.cmds(command);
-		}
-		return procStarter;
-	}
+        final ProcStarter procStarter = launcher.launch().stdout(new NullStream()).stderr(logger());
+        procStarter.envs(buildEnvironment);
+        if (command != null) {
+            procStarter.cmds(command);
+        }
+        return procStarter;
+    }
 
-	/**
-	 * 
-	 * Sets up a standard {@link ProcStarter} for the current adb environment,
-	 * ready to execute the given command.
-	 * 
-	 * @param command What command to run
-	 * @return A ready ProcStarter
-	 * 
-	 * @throws IOException
-	 * @throws InterruptedException
-	 */
-	public ProcStarter getProcStarter(ArgumentListBuilder command)
-			throws IOException, InterruptedException {
-		return getProcStarter(command, null);
-	}
+    /**
+     * 
+     * Sets up a standard {@link ProcStarter} for the current adb environment,
+     * ready to execute the given command.
+     * 
+     * @param command What command to run
+     * @return A ready ProcStarter
+     * 
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    public ProcStarter getProcStarter(ArgumentListBuilder command)
+            throws IOException, InterruptedException {
+        return getProcStarter(command, null);
+    }
 
         /**
          * Generates a ready-to-use ArgumentListBuilder for one of the Android SDK tools, based on the current context.
@@ -188,9 +188,9 @@ public class AndroidEmulatorContext {
          * @param sdkCmd The Android tool and any extra arguments for the command to run.
          * @return Arguments including the full path to the SDK and any extra Windows stuff required.
          */
-	public ArgumentListBuilder getToolCommand(final SdkCliCommand sdkCmd) {
-		return Utils.getToolCommand(sdk, launcher.isUnix(), sdkCmd);
-	}
+    public ArgumentListBuilder getToolCommand(final SdkCliCommand sdkCmd) {
+        return Utils.getToolCommand(sdk, launcher.isUnix(), sdkCmd);
+    }
 
         /**
          * Generates a ready-to-use ProcStarter for one of the Android SDK tools, based on the current context.
@@ -212,35 +212,35 @@ public class AndroidEmulatorContext {
          *
          * @param sdkCmd The Android tool and any extra arguments for the command to run.
          * @return A ready ProcStarter
-	 * @throws IOException
-	 * @throws InterruptedException
+     * @throws IOException
+     * @throws InterruptedException
          */
-	public ProcStarter getToolProcStarter(final SdkCliCommand sdkCmd)
-			throws IOException, InterruptedException {
-		return getProcStarter(Utils.getToolCommand(sdk, launcher.isUnix(), sdkCmd));
-	}
+    public ProcStarter getToolProcStarter(final SdkCliCommand sdkCmd)
+            throws IOException, InterruptedException {
+        return getProcStarter(Utils.getToolCommand(sdk, launcher.isUnix(), sdkCmd));
+    }
 
-	/**
-	 * Sends a user command to the running emulator via its telnet interface.<br>
-	 * Execution will be cancelled if it takes longer than
-	 * {@link #EMULATOR_COMMAND_TIMEOUT_MS}.
-	 * 
-	 * @param command The command to execute on the emulator's telnet interface.
-	 * @return Whether sending the command succeeded.
-	 */
-	public boolean sendCommand(final String command) {
-		return sendCommand(command, EMULATOR_COMMAND_TIMEOUT_MS);
-	}
-	
-	/**
-	 * Sends a user command to the running emulator via its telnet interface.<br>
-	 * Execution will be cancelled if it takes longer than timeout ms.
-	 * 
-	 * @param command The command to execute on the emulator's telnet interface.
-	 * @param timeout The command's timeout, in ms.
-	 * @return Whether sending the command succeeded.
-	 */
-	public boolean sendCommand(final String command, int timeout) {
-		return Utils.sendEmulatorCommand(launcher, logger(), userPort, command, timeout);
-	}
+    /**
+     * Sends a user command to the running emulator via its telnet interface.<br>
+     * Execution will be cancelled if it takes longer than
+     * {@link #EMULATOR_COMMAND_TIMEOUT_MS}.
+     * 
+     * @param command The command to execute on the emulator's telnet interface.
+     * @return Whether sending the command succeeded.
+     */
+    public boolean sendCommand(final String command) {
+        return sendCommand(command, EMULATOR_COMMAND_TIMEOUT_MS);
+    }
+    
+    /**
+     * Sends a user command to the running emulator via its telnet interface.<br>
+     * Execution will be cancelled if it takes longer than timeout ms.
+     * 
+     * @param command The command to execute on the emulator's telnet interface.
+     * @param timeout The command's timeout, in ms.
+     * @return Whether sending the command succeeded.
+     */
+    public boolean sendCommand(final String command, int timeout) {
+        return Utils.sendEmulatorCommand(launcher, logger(), userPort, command, timeout);
+    }
 }
