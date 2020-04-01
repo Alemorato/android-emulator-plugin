@@ -40,6 +40,7 @@ import jenkins.tasks.SimpleBuildWrapper;
 import jenkins.util.BuildListenerAdapter;
 import net.sf.json.JSONObject;
 import org.apache.commons.io.IOUtils;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
@@ -804,6 +805,7 @@ public class AndroidEmulator extends SimpleBuildWrapper implements Serializable 
         return false;
     }
 
+    @Symbol("android")
     @Extension(ordinal=-100) // Negative ordinal makes us execute after other wrappers (i.e. Xvnc)
     public static final class DescriptorImpl extends BuildWrapperDescriptor implements Serializable {
 
